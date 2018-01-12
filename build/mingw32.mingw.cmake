@@ -4,8 +4,8 @@
 
 set (CMAKE_SYSTEM_NAME "Windows")
 
-set (CROSS C:/Qt/Tools/mingw492_32)
-set (CROSSQT C:/Qt/5.6/mingw49_32)
+set (CROSS C:/Qt/Qt5.9.3/Tools/mingw530_32)
+set (CROSSQT C:/Qt/Qt5.9.3/5.9.3/mingw53_32)
 
 set (CMAKE_C_COMPILER     ${CROSS}/bin/gcc.exe)
 set (CMAKE_CXX_COMPILER   ${CROSS}/bin/g++.exe)
