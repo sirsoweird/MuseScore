@@ -38,6 +38,7 @@
 #include "iengravingfont.h"
 
 #include "rendering/score/horizontalspacing.h"
+#include "rendering/score/chordlayout.h"
 
 #include "accidental.h"
 #include "actionicon.h"
@@ -979,6 +980,87 @@ SymId Note::noteHead() const
     if (scheme == NoteHeadScheme::HEAD_AUTO) {
         scheme = NoteHeadScheme::HEAD_NORMAL;
     }
+
+    // For shared FA notes in shaped note schemes, use default direction as if there was only one voice.
+    // This ensures all shared FA notes use the same notehead orientation (noteShapeTriangleLeft or noteShapeTriangleRight),
+    // preventing them from forming a filled rectangle that looks like LA when overlaid.
+    // The default direction is computed from all notes at the segment, simulating single-voice behavior.
+    if (chord() && chord()->segment() && (scheme == NoteHeadScheme::HEAD_SHAPE_NOTE_4
+                                          || scheme == NoteHeadScheme::HEAD_SHAPE_NOTE_7_AIKIN
+                                          || scheme == NoteHeadScheme::HEAD_SHAPE_NOTE_7_FUNK
+                                          || scheme == NoteHeadScheme::HEAD_SHAPE_NOTE_7_WALKER)) {
+        // Determine if this note would be FA
+        // Compute the group based on scheme to check if it's FA
+        NoteHeadGroup computedGroup = headGroup;
+        // If headGroup is HEAD_NORMAL, compute what it should be based on the scheme
+        if (headGroup == NoteHeadGroup::HEAD_NORMAL) {
+            // Compute the group based on scheme (same logic as in noteHead() function)
+            if (scheme == NoteHeadScheme::HEAD_SHAPE_NOTE_4) {
+                int degree = tpc2degree(tpc(), key);
+                if (degree == 0 || degree == 3) {
+                    computedGroup = NoteHeadGroup::HEAD_FA;
+                }
+            } else if (scheme == NoteHeadScheme::HEAD_SHAPE_NOTE_7_AIKIN
+                       || scheme == NoteHeadScheme::HEAD_SHAPE_NOTE_7_FUNK
+                       || scheme == NoteHeadScheme::HEAD_SHAPE_NOTE_7_WALKER) {
+                int degree = tpc2degree(tpc(), key);
+                if (degree == 3) {
+                    computedGroup = NoteHeadGroup::HEAD_FA;
+                }
+            }
+        }
+        // If headGroup is already explicitly set to HEAD_FA, use it
+
+        // If this is a FA note, check if it's shared with other voices
+        if (computedGroup == NoteHeadGroup::HEAD_FA) {
+            Segment* seg = chord()->segment();
+            bool hasSharedNote = false;
+
+            // Check all voices in the same staff to see if this pitch is shared
+            staff_idx_t staffIdx = chord()->staffIdx();
+            for (voice_idx_t v = 0; v < VOICES; ++v) {
+                track_idx_t track = staffIdx * VOICES + v;
+                ChordRest* cr = seg->cr(track);
+                if (cr && cr->isChord()) {
+                    Chord* otherChord = toChord(cr);
+                    // Check if this chord has a note with the same pitch
+                    for (Note* otherNote : otherChord->notes()) {
+                        if (otherNote->pitch() == m_pitch && otherChord != chord()) {
+                            hasSharedNote = true;
+                            break;
+                        }
+                    }
+                    if (hasSharedNote) {
+                        break;
+                    }
+                }
+            }
+
+            // If note is shared, compute default direction from all notes at this segment
+            // This simulates what the direction would be if there was only one voice
+            if (hasSharedNote) {
+                std::vector<int> allNoteDistances;
+                // Collect note distances from all chords at this segment in the same staff
+                for (voice_idx_t v = 0; v < VOICES; ++v) {
+                    track_idx_t track = staffIdx * VOICES + v;
+                    ChordRest* cr = seg->cr(track);
+                    if (cr && cr->isChord()) {
+                        Chord* otherChord = toChord(cr);
+                        std::vector<int> distances = otherChord->noteDistances();
+                        allNoteDistances.insert(allNoteDistances.end(), distances.begin(), distances.end());
+                    }
+                }
+
+                if (!allNoteDistances.empty()) {
+                    std::sort(allNoteDistances.begin(), allNoteDistances.end());
+                    int direction = ChordLayout::computeAutoStemDirection(allNoteDistances);
+                    // If direction is ambiguous (0), default to up (noteShapeTriangleLeft)
+                    up = (direction >= 0) ? 1 : 0;
+                }
+            }
+        }
+    }
+
     SymId t = noteHead(up, headGroup, ht, tpc(), key, scheme);
     if (t == SymId::noSym) {
         LOGD("invalid notehead %d/%d", int(headGroup), int(ht));
